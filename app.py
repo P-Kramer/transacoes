@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st 
 st.set_page_config(layout="wide")
 import pandas as pd
 import sqlite3
@@ -6,7 +6,6 @@ from datetime import date
 import io
 from openpyxl.styles import Alignment, PatternFill, Font
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.dimensions import ColumnDimension
 
 EXCEL_PATH = "Movimentações.xlsx"
 DB_PATH = "transacoes.db"
@@ -59,9 +58,7 @@ def exportar_todas_aba_excel(abas):
                 max_row = ws.max_row
                 max_col = ws.max_column
 
-                # Gridlines off
                 ws.sheet_view.showGridLines = False
-
                 # Autoajustar largura
                 for col in range(1, max_col + 1):
                     max_length = 0
@@ -75,23 +72,17 @@ def exportar_todas_aba_excel(abas):
                             val = ""
                         max_length = max(max_length, len(val))
                     ws.column_dimensions[col_letter].width = max(10, min(max_length + 2, 40))
-
-                # Filtros automáticos
                 ws.auto_filter.ref = ws.dimensions
-
-                # Estilo zebra (linhas listradas) e centralização
                 for i, row in enumerate(ws.iter_rows(min_row=2, max_row=max_row, max_col=max_col), start=2):
                     fill = PatternFill("solid", fgColor="F6F7F9") if i % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
                     for cell in row:
                         cell.alignment = Alignment(horizontal="center", vertical="center")
                         cell.fill = fill
-
-                # Cabeçalho azul claro, negrito, centralizado, branco
+                # Cabeçalho azul claro, fonte preta e negrito
                 for cell in ws[1]:
-                    cell.fill = PatternFill("solid", fgColor="99CCFF")  # azul claro
-                    cell.font = Font(color="FFFFFF", bold=True)
+                    cell.fill = PatternFill("solid", fgColor="99CCFF")
+                    cell.font = Font(color="000000", bold=True)
                     cell.alignment = Alignment(horizontal="center", vertical="center")
-
     output.seek(0)
     return output
 
@@ -102,6 +93,9 @@ st.title("Confirmação de Transações")
 
 tipo = st.selectbox("Selecione o tipo de transação:", abas)
 campos = get_columns(tipo)
+tem_quantidade = any(c.lower() == "quantidade" for c in campos)
+tem_preco = any("preço" in c.lower() for c in campos)
+tem_financeiro = any("financeiro" in c.lower() for c in campos)
 
 with st.form(key="formulario_transacao"):
     st.subheader(f"Preencha os dados de '{tipo}' (estilo planilha)")
@@ -113,18 +107,22 @@ with st.form(key="formulario_transacao"):
         cols = st.columns(col_widths)
         quant_input = preco_input = None
         for idx, (col, campo) in enumerate(zip(cols, campos)):
-            if "Data" in campo:
+            campo_lower = campo.lower()
+            if "data" in campo_lower:
                 respostas[campo] = col.date_input(campo, value=date.today())
-            elif campo.lower() == "quantidade":
+            elif campo_lower == "quantidade":
                 quant_input = col.number_input(campo, min_value=0.0, step=1.0, format="%.2f")
                 respostas[campo] = quant_input
-            elif "preço" in campo.lower():
+            elif "preço" in campo_lower:
                 preco_input = col.number_input(campo, min_value=0.0, step=0.01, format="%.2f")
                 respostas[campo] = preco_input
-            elif "financeiro" in campo.lower():
-                financeiro = (quant_input or 0) * (preco_input or 0)
-                respostas[campo] = financeiro
-                col.text_input(campo, value=f"{financeiro:,.2f}", disabled=True, key=campo)
+            elif "financeiro" in campo_lower:
+                if tem_quantidade and tem_preco:
+                    financeiro = (quant_input or 0) * (preco_input or 0)
+                    respostas[campo] = financeiro
+                    col.text_input(campo, value=f"{financeiro:,.2f}", disabled=True, key=campo)
+                else:
+                    respostas[campo] = col.text_input(campo, placeholder="Digite aqui", key=campo)
             else:
                 respostas[campo] = col.text_input(campo, placeholder="Digite aqui", key=campo)
     submit = st.form_submit_button("Confirmar")
@@ -135,7 +133,6 @@ if submit and len(campos) > 0:
     st.write("Resumo dos dados preenchidos:")
     st.table(pd.DataFrame([respostas]))
 
-# Exibir as transações registradas
 st.subheader(f"Transações já registradas para: {tipo}")
 try:
     df_transacoes = consultar_transacoes(tipo)

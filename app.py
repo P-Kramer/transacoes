@@ -1,4 +1,4 @@
-import streamlit as st 
+import streamlit as st
 st.set_page_config(layout="wide")
 import pandas as pd
 import sqlite3
@@ -6,6 +6,36 @@ from datetime import date
 import io
 from openpyxl.styles import Alignment, PatternFill, Font
 from openpyxl.utils import get_column_letter
+
+# ----------- LOGIN -----------
+USUARIOS = {
+    "a": "a",
+    "outro@email.com": "minhaSenha",
+    # adicione mais aqui
+}
+
+def checar_login(email, senha):
+    return USUARIOS.get(email) == senha
+
+def mostrar_login():
+    st.title("Login")
+    with st.form("login_form"):
+        email = st.text_input("E-mail")
+        senha = st.text_input("Senha", type="password")
+        submit = st.form_submit_button("Entrar")
+        if submit:
+            if checar_login(email, senha):
+                st.session_state["logado"] = True
+                st.session_state["usuario"] = email
+                st.success("Login realizado com sucesso! Aguarde...")
+                st.rerun()
+            else:
+                st.error("E-mail ou senha inválidos!")
+
+if "logado" not in st.session_state or not st.session_state["logado"]:
+    mostrar_login()
+    st.stop()
+# ----------- FIM LOGIN -----------
 
 EXCEL_PATH = "Movimentações.xlsx"
 DB_PATH = "transacoes.db"

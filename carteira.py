@@ -26,7 +26,8 @@ def tela_carteira():
         307: "PARMIGIANO FIM",
         308: "HARPYJA FIM",
         1313: "SL_01_ON",
-        1362: "TL_01_ON"
+        1362: "TL_01_ON",
+        1489: "Medici"
         
     }
     MAPA_RENOMEACAO_ATIVOS = {

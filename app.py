@@ -25,8 +25,8 @@ CARTEIRAS = {
     307: "PARMIGIANO FIM",
     308: "HARPYJA FIM",
     1313: "SL_01_ON",
-    1362: "TL_01_ON"
-    
+    1362: "TL_01_ON",
+    1489: "MEDICI"
 }
 
 # LÓGICA FUTURA: Enviar e-mail de notificação a cada nova transação realizada

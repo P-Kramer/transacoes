@@ -27,6 +27,15 @@ def ir_para(tela):
     st.session_state.pagina_atual = tela
     st.rerun()
 
+def highlight_negative(val):
+    try:
+        val_float = float(str(val).replace(",", "").replace(" ", ""))
+        if val_float < 0:
+            return "color: red;"
+    except:
+        pass
+    return ""
+
 # ========== SUAS FUNÇÕES PRINCIPAIS (mantém iguais) ==========
 def get_columns(sheet_name):
     df = pd.read_excel(EXCEL_PATH, sheet_name=sheet_name, header=0)
@@ -211,6 +220,7 @@ def tela_carteira():
     import requests
     import pandas as pd
     from datetime import date
+    import streamlit as st
 
     MAPA_RENOMEACAO_ATIVOS = {
         "instrument_symbol": "Ticker",
@@ -347,15 +357,36 @@ def tela_carteira():
 
                 # ------- CORREÇÃO: só formata colunas realmente numéricas -------
                 for col in df_ativos.columns:
-                    # Tenta converter sem sobrescrever o original
                     col_convertida = pd.to_numeric(df_ativos[col], errors="coerce")
-                    # Só faz arredondamento/formatação se há algum número válido na coluna
                     if col_convertida.notnull().any():
                         df_ativos[col] = col_convertida.round(2).map(lambda x: "{:,.2f}".format(x) if pd.notnull(x) else "")
                 # ---------------------------------------------------------------
-                pd.set_option('display.max_rows', len(df_ativos))
-                st.dataframe(df_ativos, use_container_width=True)
 
+                # Exibir todas as linhas
+                pd.set_option('display.max_rows', len(df_ativos))
+
+                # === Destaque vermelho para valores negativos ===
+                def highlight_negative(val):
+                    try:
+                        val_float = float(str(val).replace(",", "").replace(" ", ""))
+                        if val_float < 0:
+                            return "color: red;"
+                    except:
+                        pass
+                    return ""
+
+                # Só aplica nas colunas numéricas
+                colunas_numericas = [
+                    col for col in df_ativos.columns
+                    if pd.to_numeric(df_ativos[col].str.replace(",", "").str.replace(" ", ""), errors="coerce").notnull().any()
+                ]
+
+                df_styled = df_ativos.style.applymap(
+                    highlight_negative,
+                    subset=colunas_numericas
+                )
+
+                st.dataframe(df_styled, use_container_width=True)
 
             else:
                 st.info("Nenhum ativo encontrado para a carteira e data informada.")
@@ -363,6 +394,7 @@ def tela_carteira():
             st.error(f"Erro ao buscar dados: {e}")
     else:
         st.info("Selecione uma carteira para visualizar os ativos.")
+
 
 
 

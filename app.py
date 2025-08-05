@@ -10,6 +10,8 @@ from openpyxl.utils import get_column_letter
 from transacoes import tela_transacoes
 from carteira import tela_carteira
 
+from PIL import Image
+logo_longview = Image.open("longview.png")
 # ========== CONFIGURAÇÕES ==========
 st.set_page_config(layout="wide")
 BASE_URL_API = "https://longview.bluedeck.com.br/api"
@@ -70,6 +72,8 @@ def highlight_negative(val):
         pass
     return ""
 
+def mostrar_header():
+    st.image(logo_longview, use_container_width=False, width=320)
 
 # ========== CONTROLE DE SESSÃO ==========
 if "pagina_atual" not in st.session_state:
@@ -80,9 +84,11 @@ if "headers" not in st.session_state:
     st.session_state.headers = None
 
 # ========== LOGOUT SEMPRE VISÍVEL ==========
-col1, col2, col3, col4 = st.columns(4)
+mostrar_header()
+
+col1, col2, col3 = st.columns(3)
 if st.session_state.token:
-    with col4:
+    with col3:
         if st.button("Logout", key="logout-btn"):
             st.session_state.clear()
             st.rerun()

@@ -107,6 +107,50 @@ BASE_URL_API = "https://longview.bluedeck.com.br/api"
 EXCEL_PATH = "Movimentações.xlsx"
 DB_PATH = "transacoes.db"
 
+def obter_ultima_data_liberada(portfolio_id, headers, dias_busca=7):
+    from datetime import datetime, timedelta
+
+    end_date = datetime.today().date()
+    start_date = end_date - timedelta(days=dias_busca)
+
+    payload = {
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "portfolio_ids": [portfolio_id]
+    }
+    url = f"{BASE_URL_API}/portfolio_position/recon_positions/get_reconciliations"
+
+    try:
+        r = requests.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+        result = r.json()
+        # st.write("API raw result:", result)  # Para debug, se quiser
+
+        reconciliacoes = result.get("objects", {})
+        if not isinstance(reconciliacoes, dict):
+            return None
+
+        # Considera status==2 como "LIBERADA"
+        liberadas = [
+            v for v in reconciliacoes.values()
+            if isinstance(v, dict) and v.get("status") == 2 and v.get("date")
+        ]
+
+        # st.write("Liberadas:", liberadas)  # Para debug
+
+        if not liberadas:
+            return None
+
+        # Encontra a última data (mais recente)
+        datas_liberadas = [v.get("date") for v in liberadas]
+        ultima = max(datas_liberadas) if datas_liberadas else None
+        return ultima
+    except Exception as e:
+        st.warning(f"Erro ao buscar última data liberada: {e}")
+        return None
+
+
+    
 def get_columns(sheet_name):
     df = pd.read_excel(EXCEL_PATH, sheet_name=sheet_name, header=0)
     colunas = [c for c in df.columns if not str(c).startswith("Unnamed") and not str(c).startswith("Column")]
@@ -176,12 +220,21 @@ def exportar_todas_aba_excel(abas):
 def tela_transacoes():
     st.title("Carteira - Ativos e Lançamento de Transações")
 
-    carteira_nome = st.selectbox(
-        "Selecione a carteira",
-        options=list(CARTEIRAS.values()),
-        key="carteira_select"
-    )
+    carteira_nome = st.selectbox("Selecione a carteira", options=list(CARTEIRAS.values()))
     carteira_id = [k for k, v in CARTEIRAS.items() if v == carteira_nome]
+    headers = st.session_state.headers  # ajuste conforme seu login/autenticação
+
+    ultima_data = obter_ultima_data_liberada(carteira_id[0], headers)
+
+    carteira_nome = CARTEIRAS[carteira_id[0]]
+    if ultima_data:
+        titulo_carteira = f"{carteira_nome} — CARTEIRA DO DIA {ultima_data}"
+    else:
+        titulo_carteira = f"{carteira_nome} — CARTEIRA DO DIA -"
+
+    st.subheader(titulo_carteira)  # <-- **Aqui exibe no topo**
+
+
     data_hoje = date.today()
 
     # Carrega os ativos da carteira (API Bluedeck ou outro endpoint)
@@ -264,6 +317,7 @@ def tela_transacoes():
     else:
         st.info("Selecione uma carteira para visualizar os ativos.")
 
+    st.subheader(f"Transação da {carteira_nome}:")
     # Transações
     excel_file = pd.ExcelFile(EXCEL_PATH)
     abas = excel_file.sheet_names
@@ -275,12 +329,14 @@ def tela_transacoes():
 
     ordem_atual = st.selectbox("Ordem", options=["C", "V"], key="ordem_global_top")
 
-    # Bloco CORRIGIDO: gera apenas colunas para campos visíveis
-    campos_visiveis = [campo for campo in campos if campo.lower() not in ["ordem", "cliente"]]
-    colunas = st.columns(len(campos_visiveis), gap="small")
 
     with st.form(key="formulario_transacao"):
         st.subheader(f"Lançar transação de '{tipo}'")
+            # Bloco CORRIGIDO: gera apenas colunas para campos visíveis
+        campos_visiveis = [campo for campo in campos if campo.lower() not in ["ordem", "cliente"]]
+        colunas = st.columns(len(campos_visiveis), gap="small")
+
+
         respostas = {}
         respostas["Ordem"] = ordem_atual
         respostas["Cliente"] = carteira_nome
@@ -360,9 +416,33 @@ def tela_transacoes():
     st.subheader(f"Transações já registradas para: {tipo}")
     try:
         df_transacoes = consultar_transacoes(tipo)
-        st.dataframe(df_transacoes)
-    except Exception:
-        pass
+        if not df_transacoes.empty:
+            st.dataframe(df_transacoes, use_container_width=True)
+            
+            # Seleção de transações para excluir (pela coluna 'id')
+            if 'id' in df_transacoes.columns:
+                ids_para_apagar = st.multiselect(
+                    "Selecione os IDs das transações para excluir:",
+                    options=df_transacoes['id'].tolist(),
+                    format_func=lambda x: f"ID: {x} | {df_transacoes[df_transacoes['id'] == x].to_dict(orient='records')[0]}"
+                )
+            else:
+                st.warning("Tabela de transações não possui coluna 'id'. Impossível apagar de forma segura.")
+                ids_para_apagar = []
+            
+            if st.button("Excluir selecionadas", type="primary", disabled=(len(ids_para_apagar) == 0)):
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                for trans_id in ids_para_apagar:
+                    cursor.execute(f'DELETE FROM "{tipo}" WHERE id=?', (trans_id,))
+                conn.commit()
+                conn.close()
+                st.success(f"{len(ids_para_apagar)} transação(ões) excluída(s).")
+                st.rerun()
+        else:
+            st.info("Nenhuma transação registrada ainda.")
+    except Exception as e:
+        st.warning(f"Erro ao exibir/excluir transações: {e}")
 
     st.markdown("### Download geral de todas as transações")
     if st.button("Baixar todas as transações formatadas (.xlsx)", key="btn-download"):

@@ -87,12 +87,20 @@ MAPA_RENOMEACAO_ATIVOS = {
     "issuer_id": "Emissor ID"
 }
 ORDEM_COLUNAS = [
+    "Dt. Início",
     "Ticker",
-    "Nome",
-    "Tipo do Ticker",
+    "Book",
     "Quantidade",
+    "Prazo Médio",
+    "Duração",
     "Preço",
     "Vl. Financeiro",
+    'Preço Exposição',
+    'Valor de Exposição',
+    "PnL Total",
+    'PnL % Total',
+    'PnL Beta',
+    "PnL % Beta"
     # ...adicione mais se desejar...
 ]
 BASE_URL_API = "https://longview.bluedeck.com.br/api"

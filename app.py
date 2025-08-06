@@ -8,7 +8,7 @@ from openpyxl.styles import Alignment, PatternFill, Font
 from openpyxl.utils import get_column_letter
 
 from transacoes import tela_transacoes
-from carteira import tela_carteira
+
 
 from PIL import Image
 logo_longview = Image.open("longview.png")
@@ -88,36 +88,10 @@ mostrar_header()
 
 col1, col2, col3 = st.columns(3)
 if st.session_state.token:
-    with col3:
+    with col1:
         if st.button("Logout", key="logout-btn"):
             st.session_state.clear()
             st.rerun()
-    with col1:
-        if st.session_state.pagina_atual != "menu":
-            if st.button("Voltar ao menu"):
-                ir_para("menu")
-
-# ========== TELAS ==========
-def tela_menu():
-    st.title("Menu Principal")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Transações"):
-            ir_para("transacoes")
-            st.rerun()
-    with col2:
-        if st.button("Status Carteira"):
-            ir_para("carteira")
-            st.rerun()
-    with col3:
-        if st.button("Configurações"):
-            ir_para("configuracoes")
-            st.rerun()
-
-
-
-
-
 
 
 def tela_configuracoes():
@@ -145,18 +119,13 @@ if st.session_state.pagina_atual == "login" and not st.session_state.token:
                 "Authorization": f"Bearer {st.session_state.token}"
             }
             st.success("Login bem-sucedido!")
-            ir_para("menu")
+            ir_para("transacoes")
             st.rerun()
         except Exception as e:
             st.error(f"Erro ao autenticar: {e}")
 
 # ========== NAVEGAÇÃO ENTRE TELAS ==========
 elif st.session_state.token:
-    if st.session_state.pagina_atual == "menu":
-        tela_menu()
-    elif st.session_state.pagina_atual == "transacoes":
+    if st.session_state.pagina_atual == "transacoes":
         tela_transacoes()
-    elif st.session_state.pagina_atual == "carteira":
-        tela_carteira()
-    elif st.session_state.pagina_atual == "configuracoes":
-        tela_configuracoes()
+

@@ -491,7 +491,7 @@ def tela_transacoes():
 
     # ------- EXPANDER TRANSACOES JÁ REGISTRADAS -------
     st.markdown("---")
-    st.markdown("### Transações já registradas")
+    st.markdown(f"### Transações já registradas em {tipo}")
     with st.expander("⬇️ Transações já registradas", expanded=False):
         try:
             df_transacoes = consultar_transacoes(tipo)

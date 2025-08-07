@@ -8,6 +8,10 @@ from openpyxl.styles import Alignment, PatternFill, Font
 from openpyxl.utils import get_column_letter
 from info_carteiras import CARTEIRAS
 
+REMETENTE = "vinicius.x.santos11@gmail.com"
+DESTINATARIOS = ["operations@longviewcapital.com.br, enio.shinohara@longviewcapital.com.br"]  # Pode incluir quantos quiser!
+SENHA_APP = "cjcx rvdr xtos vkiy"
+
 MAPA_RENOMEACAO_ATIVOS = {
     "instrument_symbol": "Ticker",
     "instrument_id": "Ticker ID",
@@ -106,6 +110,27 @@ if "msg_erro_transacao" not in st.session_state:
 def reset_validacao():
     st.session_state.validado_transacao = False
     st.session_state.msg_erro_transacao = ""
+
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+def enviar_email_transacao(destinatarios, assunto, mensagem, remetente, senha_app):
+    msg = MIMEMultipart()
+    msg['From'] = remetente
+    msg['To'] = ", ".join(destinatarios)
+    msg['Subject'] = assunto
+    msg.attach(MIMEText(mensagem, 'html'))
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(remetente, senha_app)
+            server.sendmail(remetente, destinatarios, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Erro ao enviar e-mail: {e}")
+        return False
+
 
 def get_caixa_disponivel(df_ativos):
     if "Book" in df_ativos.columns and "Vl. Financeiro" in df_ativos.columns:
@@ -488,6 +513,26 @@ def tela_transacoes():
                         st.success("Transação registrada com sucesso!")
                         st.write("Resumo dos dados preenchidos:")
                         st.table(pd.DataFrame([respostas]))
+                        # ENVIO DE EMAIL PARA MÚLTIPLOS DESTINATÁRIOS
+                        try:
+                            df_transacoes = consultar_transacoes(tipo)
+                            ultima = df_transacoes.iloc[-1]
+                            html = f"<h3>Última transação registrada ({tipo}):</h3><ul>"
+                            for col, val in ultima.items():
+                                html += f"<li><b>{col}:</b> {val}</li>"
+                            html += "</ul>"
+
+                            sucesso = enviar_email_transacao(
+                                destinatarios=DESTINATARIOS,
+                                assunto=f"Nova transação registrada ({tipo})",
+                                mensagem=html,
+                                remetente=REMETENTE,
+                                senha_app=SENHA_APP
+                            )
+                            if sucesso:
+                                st.info(f"E-mail enviado para {', '.join(DESTINATARIOS)}")
+                        except Exception as e:
+                            st.warning(f"Não foi possível enviar o e-mail automático: {e}")
 
     # ------- EXPANDER TRANSACOES JÁ REGISTRADAS -------
     st.markdown("---")

@@ -6,16 +6,8 @@ import io
 import sqlite3
 from openpyxl.styles import Alignment, PatternFill, Font
 from openpyxl.utils import get_column_letter
+from info_carteiras import CARTEIRAS
 
-CARTEIRAS = {
-    257: "PEPENERO FIM",
-    275: "FILIPINA FIM",
-    307: "PARMIGIANO FIM",
-    308: "HARPYJA FIM",
-    1313: "SL_01_ON",
-    1362: "TL_01_ON",
-    1489: "MEDICI"
-}
 MAPA_RENOMEACAO_ATIVOS = {
     "instrument_symbol": "Ticker",
     "instrument_id": "Ticker ID",
@@ -101,11 +93,39 @@ ORDEM_COLUNAS = [
     'PnL % Total',
     'PnL Beta',
     "PnL % Beta"
-    # ...adicione mais se desejar...
 ]
 BASE_URL_API = "https://longview.bluedeck.com.br/api"
 EXCEL_PATH = "Movimentações.xlsx"
 DB_PATH = "transacoes.db"
+
+if "validado_transacao" not in st.session_state:
+    st.session_state.validado_transacao = False
+if "msg_erro_transacao" not in st.session_state:
+    st.session_state.msg_erro_transacao = ""
+
+def reset_validacao():
+    st.session_state.validado_transacao = False
+    st.session_state.msg_erro_transacao = ""
+
+def get_caixa_disponivel(df_ativos):
+    if "Book" in df_ativos.columns and "Vl. Financeiro" in df_ativos.columns:
+        df_caixa = df_ativos[df_ativos["Book"].str.lower() == "caixa"]
+        if df_caixa.empty:
+            return 0.0
+        def to_float(val):
+            if isinstance(val, (float, int)):
+                return float(val)
+            if isinstance(val, str):
+                val = val.replace(",", "").replace(" ", "")
+                try:
+                    return float(val)
+                except Exception:
+                    return 0.0
+            return 0.0
+
+        total = df_caixa["Vl. Financeiro"].map(to_float).sum()
+        return total
+    return 0.0
 
 def obter_ultima_data_liberada(portfolio_id, headers, dias_busca=7):
     from datetime import datetime, timedelta
@@ -124,24 +144,17 @@ def obter_ultima_data_liberada(portfolio_id, headers, dias_busca=7):
         r = requests.post(url, json=payload, headers=headers)
         r.raise_for_status()
         result = r.json()
-        # st.write("API raw result:", result)  # Para debug, se quiser
-
         reconciliacoes = result.get("objects", {})
         if not isinstance(reconciliacoes, dict):
             return None
 
-        # Considera status==2 como "LIBERADA"
         liberadas = [
             v for v in reconciliacoes.values()
             if isinstance(v, dict) and v.get("status") == 2 and v.get("date")
         ]
-
-        # st.write("Liberadas:", liberadas)  # Para debug
-
         if not liberadas:
             return None
 
-        # Encontra a última data (mais recente)
         datas_liberadas = [v.get("date") for v in liberadas]
         ultima = max(datas_liberadas) if datas_liberadas else None
         return ultima
@@ -149,8 +162,6 @@ def obter_ultima_data_liberada(portfolio_id, headers, dias_busca=7):
         st.warning(f"Erro ao buscar última data liberada: {e}")
         return None
 
-
-    
 def get_columns(sheet_name):
     df = pd.read_excel(EXCEL_PATH, sheet_name=sheet_name, header=0)
     colunas = [c for c in df.columns if not str(c).startswith("Unnamed") and not str(c).startswith("Column")]
@@ -222,7 +233,7 @@ def tela_transacoes():
 
     carteira_nome = st.selectbox("Selecione a carteira", options=list(CARTEIRAS.values()))
     carteira_id = [k for k, v in CARTEIRAS.items() if v == carteira_nome]
-    headers = st.session_state.headers  # ajuste conforme seu login/autenticação
+    headers = st.session_state.headers
 
     ultima_data = obter_ultima_data_liberada(carteira_id[0], headers)
 
@@ -232,126 +243,183 @@ def tela_transacoes():
     else:
         titulo_carteira = f"{carteira_nome} — CARTEIRA DO DIA -"
 
-    st.subheader(titulo_carteira)  # <-- **Aqui exibe no topo**
-
+    st.subheader(titulo_carteira)
 
     data_hoje = date.today()
-
-    # Carrega os ativos da carteira (API Bluedeck ou outro endpoint)
     df_ativos = pd.DataFrame()
-    if carteira_id:
+
+    # ------- EXPANDER ATIVOS -------
+    with st.expander("⬇️ Ativos da Carteira", expanded=True):
+        if carteira_id:
+            payload = {
+                "start_date": str(data_hoje),
+                "end_date": str(data_hoje),
+                "instrument_position_aggregation": 3,
+                "portfolio_ids": carteira_id
+            }
+            try:
+                r = requests.post(
+                    f"{BASE_URL_API}/portfolio_position/positions/get",
+                    json=payload,
+                    headers=st.session_state.headers
+                )
+                r.raise_for_status()
+                resultado = r.json()
+                dados = resultado.get("objects", {})
+
+                registros = []
+                for item in dados.values():
+                    if isinstance(item, list):
+                        registros.extend(item)
+                    else:
+                        registros.append(item)
+
+                df = pd.json_normalize(registros)
+                if "instrument_positions" in df.columns:
+                    lista_ativos = []
+                    for lista in df["instrument_positions"]:
+                        if isinstance(lista, list) and lista:
+                            df_tmp = pd.json_normalize(lista)
+                            lista_ativos.append(df_tmp)
+                    if lista_ativos:
+                        df_ativos = pd.concat(lista_ativos, ignore_index=True)
+
+                if not df_ativos.empty:
+                    df_ativos = df_ativos.dropna(axis=1, how="all")
+                    df_ativos = df_ativos.rename(columns=MAPA_RENOMEACAO_ATIVOS)
+                    df_ativos = df_ativos[[col for col in df_ativos.columns if "repetido" not in col.lower()]]
+                    colunas_ordenadas = [col for col in ORDEM_COLUNAS if col in df_ativos.columns]
+                    colunas_restantes = [col for col in df_ativos.columns if col not in colunas_ordenadas]
+                    ordem_final = colunas_ordenadas + colunas_restantes
+                    df_ativos = df_ativos[ordem_final]
+
+                    for col in df_ativos.columns:
+                        col_convertida = pd.to_numeric(df_ativos[col], errors="coerce")
+                        if col_convertida.notnull().any():
+                            df_ativos[col] = col_convertida.round(2).map(lambda x: "{:,.2f}".format(x) if pd.notnull(x) else "")
+                    pd.set_option('display.max_rows', len(df_ativos))
+
+                    def highlight_negative(val):
+                        try:
+                            val_float = float(str(val).replace(",", "").replace(" ", ""))
+                            if val_float < 0:
+                                return "color: red;"
+                        except:
+                            pass
+                        return ""
+                    colunas_numericas = [
+                        col for col in df_ativos.columns
+                        if pd.to_numeric(df_ativos[col].str.replace(",", "").str.replace(" ", ""), errors="coerce").notnull().any()
+                    ]
+                    df_styled = df_ativos.style.applymap(
+                        highlight_negative,
+                        subset=colunas_numericas
+                    )
+
+                    st.dataframe(df_styled, use_container_width=True)
+                else:
+                    st.info("Nenhum ativo encontrado para a carteira e data informada.")
+            except Exception as e:
+                st.error(f"Erro ao buscar dados: {e}")
+        else:
+            st.info("Selecione uma carteira para visualizar os ativos.")
+
+    # ------- EXPANDER COMPLIANCE -------
+    st.markdown("---")
+    st.markdown(f"### Compliance da {titulo_carteira}")
+    with st.expander("⬇️ Compliance da Carteira", expanded=True):
+        def rename(df):
+            df.rename(columns={
+                "portfolio_name": "Portfolio",
+                "portfolio_id": "ID Carteira",
+                "compliance_message": "Descrição",
+                "compliance_summary": "Posição",
+                "created_at": "Data de Criação",
+                "id": "ID",
+                "reference_date": "Data",
+                "rule_id": "Regra ID",
+                "rule_name": "Regra",
+                "status": "Status de Compliance",
+                "updated_at": "Última Atualização"
+            }, inplace=True)
+            return df
+
         payload = {
-            "start_date": str(data_hoje),
-            "end_date": str(data_hoje),
-            "instrument_position_aggregation": 3,
+            "start_date": ultima_data,
+            "end_date": ultima_data,
             "portfolio_ids": carteira_id
         }
-        try:
-            # ATENÇÃO: Adapte o headers/token conforme o necessário para sua API!
-            r = requests.post(
-                f"{BASE_URL_API}/portfolio_position/positions/get",
-                json=payload,
-                headers=st.session_state.headers  # garanta que headers está definido!
-            )
-            r.raise_for_status()
-            resultado = r.json()
-            dados = resultado.get("objects", {})
+        r = requests.post(
+            f"{BASE_URL_API}/compliance/compliancestatus",
+            json=payload,
+            headers=st.session_state.headers
+        )
+        r.raise_for_status()
+        resultado = r.json()
+        dados = resultado.get("objects", {})
 
-            registros = []
-            for item in dados.values():
-                if isinstance(item, list):
-                    registros.extend(item)
-                else:
-                    registros.append(item)
-
-            df = pd.json_normalize(registros)
-            if "instrument_positions" in df.columns:
-                lista_ativos = []
-                for lista in df["instrument_positions"]:
-                    if isinstance(lista, list) and lista:
-                        df_tmp = pd.json_normalize(lista)
-                        lista_ativos.append(df_tmp)
-                if lista_ativos:
-                    df_ativos = pd.concat(lista_ativos, ignore_index=True)
-
-            if not df_ativos.empty:
-                df_ativos = df_ativos.dropna(axis=1, how="all")
-                df_ativos = df_ativos.rename(columns=MAPA_RENOMEACAO_ATIVOS)
-                df_ativos = df_ativos[[col for col in df_ativos.columns if "repetido" not in col.lower()]]
-                colunas_ordenadas = [col for col in ORDEM_COLUNAS if col in df_ativos.columns]
-                colunas_restantes = [col for col in df_ativos.columns if col not in colunas_ordenadas]
-                ordem_final = colunas_ordenadas + colunas_restantes
-                df_ativos = df_ativos[ordem_final]
-
-                # Formatação numérica
-                for col in df_ativos.columns:
-                    col_convertida = pd.to_numeric(df_ativos[col], errors="coerce")
-                    if col_convertida.notnull().any():
-                        df_ativos[col] = col_convertida.round(2).map(lambda x: "{:,.2f}".format(x) if pd.notnull(x) else "")
-                pd.set_option('display.max_rows', len(df_ativos))
-
-                # Destaque valores negativos (opcional)
-                def highlight_negative(val):
-                    try:
-                        val_float = float(str(val).replace(",", "").replace(" ", ""))
-                        if val_float < 0:
-                            return "color: red;"
-                    except:
-                        pass
-                    return ""
-                colunas_numericas = [
-                    col for col in df_ativos.columns
-                    if pd.to_numeric(df_ativos[col].str.replace(",", "").str.replace(" ", ""), errors="coerce").notnull().any()
-                ]
-                df_styled = df_ativos.style.applymap(
-                    highlight_negative,
-                    subset=colunas_numericas
-                )
-
-                st.dataframe(df_styled, use_container_width=True)
-
+        registros = []
+        for item in dados.values():
+            if isinstance(item, list):
+                registros.extend(item)
             else:
-                st.info("Nenhum ativo encontrado para a carteira e data informada.")
-        except Exception as e:
-            st.error(f"Erro ao buscar dados: {e}")
-    else:
-        st.info("Selecione uma carteira para visualizar os ativos.")
+                registros.append(item)
 
-    st.subheader(f"Transação da {carteira_nome}:")
-    # Transações
-    excel_file = pd.ExcelFile(EXCEL_PATH)
-    abas = excel_file.sheet_names
-    tipo = st.selectbox("Selecione o tipo de transação:", abas)
-    campos = get_columns(tipo)
-    tem_quantidade = any(c.lower() == "quantidade" for c in campos)
-    tem_preco = any("preço" in c.lower() for c in campos)
-    tem_financeiro = any("financeiro" in c.lower() for c in campos)
+        df = pd.json_normalize(registros)
+        df = rename(df)
+        if "Status de Compliance" in df.columns:
+            df["Status de Compliance"] = df["Status de Compliance"].replace({
+                1: "ENQUADRADO",
+                2: "ALERTA",
+                3: "DESENQUADRADO"
+            })
 
-    ordem_atual = st.selectbox("Ordem", options=["C", "V"], key="ordem_global_top")
+        cols_to_drop = [col for col in df.columns if 'repetido' in col.lower() or 'Repetido' in col]
+        df = df.drop(columns=cols_to_drop)
+        st.session_state.colunas_overview = sorted(df.columns)
+        st.session_state.df = df
 
-
-    with st.form(key="formulario_transacao"):
-        st.subheader(f"Lançar transação de '{tipo}'")
-            # Bloco CORRIGIDO: gera apenas colunas para campos visíveis
-        campos_visiveis = [campo for campo in campos if campo.lower() not in ["ordem", "cliente"]]
-        colunas = st.columns(len(campos_visiveis), gap="small")
-
-
-        respostas = {}
-        respostas["Ordem"] = ordem_atual
-        respostas["Cliente"] = carteira_nome
-
-        ativo_escolhido = None
-        qtd_disponivel = None
-        quantidade_digitada = None
-        erro_validacao = None
-
-        if len(campos) == 0:
-            st.warning("Nenhum campo encontrado para esta aba. Verifique a planilha.")
+        df_filtrado = df
+        st.session_state.df = df_filtrado
+        if st.session_state.df.empty:
+            st.warning("Nenhum dado encontrado para os filtros informados.")
         else:
-            quant_input = preco_input = None
+            st.dataframe(df_filtrado, use_container_width=True)
 
-            for col, campo in zip(colunas, campos_visiveis):
+    # ------- EXPANDER TRANSAÇÃO -------
+    st.markdown("---")
+    st.markdown("### Lançar Nova Transação")
+    with st.expander("⬇️ Lançar Nova Transação", expanded=True):
+        excel_file = pd.ExcelFile(EXCEL_PATH)
+        abas = excel_file.sheet_names
+        tipo = st.selectbox("Selecione o tipo de transação:", abas)
+        campos = get_columns(tipo)
+        tem_quantidade = any(c.lower() == "quantidade" for c in campos)
+        tem_preco = any("preço" in c.lower() for c in campos)
+        tem_financeiro = any("financeiro" in c.lower() for c in campos)
+
+        ordem_atual = st.selectbox("Ordem", options=["C", "V"], key="ordem_global_top")
+
+        with st.form(key="formulario_transacao"):
+            st.subheader(f"Lançar transação de '{tipo}'")
+            campos_visiveis = [campo for campo in campos if campo.lower() not in ["ordem", "cliente"]]
+
+            ordem_manual = ["Quantidade", "Preço", "Financeiro (BRL)"]
+            campos_ordenados = [c for c in ordem_manual if c in campos_visiveis] + [c for c in campos_visiveis if c not in ordem_manual]
+            colunas = st.columns(len(campos_ordenados), gap="small")
+
+            respostas = {}
+            respostas["Ordem"] = ordem_atual
+            respostas["Cliente"] = carteira_nome
+
+            ativo_escolhido = None
+            qtd_disponivel = None
+            quantidade_digitada = None
+            preco_input = None
+
+            caixa_disponivel = get_caixa_disponivel(df_ativos) if ordem_atual == "C" else None
+            bloquear_submit = False
+            for col, campo in zip(colunas, campos_ordenados):
                 campo_lower = campo.lower()
                 if "data" in campo_lower:
                     respostas[campo] = col.date_input(campo, value=date.today())
@@ -382,9 +450,7 @@ def tela_transacoes():
                         )
                         respostas[campo] = quantidade_digitada
                         if quantidade_digitada > (qtd_disponivel if qtd_disponivel is not None else 0):
-                            erro_validacao = f"Quantidade maior que disponível ({qtd_disponivel})"
-                        if erro_validacao:
-                            col.warning(erro_validacao)
+                            col.warning(f"Quantidade maior que disponível ({qtd_disponivel})")
                     else:
                         quantidade_digitada = col.number_input(
                             campo, min_value=0.01, step=1.0, format="%.2f", key=f"{campo}_compra"
@@ -394,56 +460,69 @@ def tela_transacoes():
                     preco_input = col.number_input(campo, min_value=0.0, step=0.01, format="%.2f")
                     respostas[campo] = preco_input
                 elif "financeiro" in campo_lower:
-                    if tem_quantidade and tem_preco:
-                        financeiro = (quantidade_digitada or 0) * (preco_input or 0)
-                        respostas[campo] = financeiro
-                        col.text_input(campo, value=f"{financeiro:,.2f}", disabled=True, key=campo)
+                    bloquear_submit = False
+                    financeiro_str = col.number_input(campo, placeholder="Digite aqui", key=campo)
+                    respostas[campo] = financeiro_str
+
+                    def str_para_float(valor):
+                        if isinstance(valor, str):
+                            valor = valor.replace('.', '').replace(',', '.')
+                        try:
+                            return float(valor)
+                        except:
+                            return 0.0
+
+                    financeiro_float = str_para_float(financeiro_str)
+                    caixa_float = float(caixa_disponivel) if caixa_disponivel is not None else 0.0
+            submit = st.form_submit_button("Confirmar", disabled=bloquear_submit)
+
+            if submit and len(campos) > 0:
+                    if ordem_atual == "C" and "Financeiro (BRL)" in respostas and caixa_disponivel is not None:
+                        if float(respostas["Financeiro (BRL)"]) > caixa_disponivel:
+                            st.error(f"Transação não registrada: compra maior que o caixa disponível (R$ {caixa_disponivel:,.2f})")
+                            return
+                    if ordem_atual == "V" and (quantidade_digitada is None or quantidade_digitada > (qtd_disponivel or 0)):
+                        st.error(f"Quantidade para venda maior do que disponível ({qtd_disponivel}). Transação não registrada.")
                     else:
-                        respostas[campo] = col.text_input(campo, placeholder="Digite aqui", key=campo)
+                        salvar_transacao(tipo, respostas)
+                        st.success("Transação registrada com sucesso!")
+                        st.write("Resumo dos dados preenchidos:")
+                        st.table(pd.DataFrame([respostas]))
+
+    # ------- EXPANDER TRANSACOES JÁ REGISTRADAS -------
+    st.markdown("---")
+    st.markdown("### Transações já registradas")
+    with st.expander("⬇️ Transações já registradas", expanded=False):
+        try:
+            df_transacoes = consultar_transacoes(tipo)
+            if not df_transacoes.empty:
+                st.dataframe(df_transacoes, use_container_width=True)
+
+                if 'id' in df_transacoes.columns:
+                    ids_para_apagar = st.multiselect(
+                        "Selecione os IDs das transações para excluir:",
+                        options=df_transacoes['id'].tolist(),
+                        format_func=lambda x: f"ID: {x} | {df_transacoes[df_transacoes['id'] == x].to_dict(orient='records')[0]}"
+                    )
                 else:
-                    respostas[campo] = col.text_input(campo, placeholder="Digite aqui", key=campo)
-        submit = st.form_submit_button("Confirmar")
+                    st.warning("Tabela de transações não possui coluna 'id'. Impossível apagar de forma segura.")
+                    ids_para_apagar = []
 
-    if submit and len(campos) > 0:
-        if ordem_atual == "V" and (quantidade_digitada is None or quantidade_digitada > (qtd_disponivel or 0)):
-            st.error(f"Quantidade para venda maior do que disponível ({qtd_disponivel}). Transação não registrada.")
-        else:
-            salvar_transacao(tipo, respostas)
-            st.success("Transação registrada com sucesso!")
-            st.write("Resumo dos dados preenchidos:")
-            st.table(pd.DataFrame([respostas]))
-
-    st.subheader(f"Transações já registradas para: {tipo}")
-    try:
-        df_transacoes = consultar_transacoes(tipo)
-        if not df_transacoes.empty:
-            st.dataframe(df_transacoes, use_container_width=True)
-            
-            # Seleção de transações para excluir (pela coluna 'id')
-            if 'id' in df_transacoes.columns:
-                ids_para_apagar = st.multiselect(
-                    "Selecione os IDs das transações para excluir:",
-                    options=df_transacoes['id'].tolist(),
-                    format_func=lambda x: f"ID: {x} | {df_transacoes[df_transacoes['id'] == x].to_dict(orient='records')[0]}"
-                )
+                if st.button("Excluir selecionadas", type="primary", disabled=(len(ids_para_apagar) == 0)):
+                    conn = sqlite3.connect(DB_PATH)
+                    cursor = conn.cursor()
+                    for trans_id in ids_para_apagar:
+                        cursor.execute(f'DELETE FROM "{tipo}" WHERE id=?', (trans_id,))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"{len(ids_para_apagar)} transação(ões) excluída(s).")
+                    st.rerun()
             else:
-                st.warning("Tabela de transações não possui coluna 'id'. Impossível apagar de forma segura.")
-                ids_para_apagar = []
-            
-            if st.button("Excluir selecionadas", type="primary", disabled=(len(ids_para_apagar) == 0)):
-                conn = sqlite3.connect(DB_PATH)
-                cursor = conn.cursor()
-                for trans_id in ids_para_apagar:
-                    cursor.execute(f'DELETE FROM "{tipo}" WHERE id=?', (trans_id,))
-                conn.commit()
-                conn.close()
-                st.success(f"{len(ids_para_apagar)} transação(ões) excluída(s).")
-                st.rerun()
-        else:
-            st.info("Nenhuma transação registrada ainda.")
-    except Exception as e:
-        st.warning(f"Erro ao exibir/excluir transações: {e}")
+                st.info("Nenhuma transação registrada ainda.")
+        except Exception as e:
+            st.warning(f"Erro ao exibir/excluir transações: {e}")
 
+    st.markdown("---")
     st.markdown("### Download geral de todas as transações")
     if st.button("Baixar todas as transações formatadas (.xlsx)", key="btn-download"):
         excel_export = exportar_todas_aba_excel(abas)
@@ -456,3 +535,5 @@ def tela_transacoes():
 
     st.caption("Exportação completa: uma aba por tipo, formatação profissional, filtros e zebra. Se quiser ainda mais customização, só avisar!")
 
+# Para rodar:
+# tela_transacoes()

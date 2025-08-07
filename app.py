@@ -8,7 +8,7 @@ from openpyxl.styles import Alignment, PatternFill, Font
 from openpyxl.utils import get_column_letter
 
 from transacoes import tela_transacoes
-
+from alterar_carteiras import alterar_carteiras
 
 from PIL import Image
 logo_longview = Image.open("longview.png")
@@ -19,15 +19,7 @@ CLIENT_ID = "46745f1ee8a39550799966aeac655589.access"
 CLIENT_SECRET = "7c8c1802b0f4c9ac4ebe57eee3eb84f4ed87a2eb6a25a5b3afe335474708ce11"
 EXCEL_PATH = "Movimentações.xlsx"
 DB_PATH = "transacoes.db"
-CARTEIRAS = {
-    257: "PEPENERO FIM",
-    275: "FILIPINA FIM",
-    307: "PARMIGIANO FIM",
-    308: "HARPYJA FIM",
-    1313: "SL_01_ON",
-    1362: "TL_01_ON",
-    1489: "MEDICI"
-}
+from info_carteiras import CARTEIRAS
 
 # LÓGICA FUTURA: Enviar e-mail de notificação a cada nova transação realizada
 #
@@ -73,7 +65,11 @@ def highlight_negative(val):
     return ""
 
 def mostrar_header():
-    st.image(logo_longview, use_container_width=False, width=320)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(logo_longview, use_container_width=False, width=320)
+
+
 
 # ========== CONTROLE DE SESSÃO ==========
 if "pagina_atual" not in st.session_state:
@@ -92,7 +88,16 @@ if st.session_state.token:
         if st.button("Logout", key="logout-btn"):
             st.session_state.clear()
             st.rerun()
-
+    if st.session_state.pagina_atual == "transacoes":
+        with col2:
+            if st.button ("💳 Alterar Carteiras"):
+                ir_para("carteiras")
+                st.rerun()
+    if st.session_state.pagina_atual == "carteiras":
+        with col2:
+            if st.button ("📑 Transaçoes"):
+                ir_para("transacoes")
+                st.rerun()
 
 def tela_configuracoes():
     st.title("Configurações")
@@ -128,4 +133,5 @@ if st.session_state.pagina_atual == "login" and not st.session_state.token:
 elif st.session_state.token:
     if st.session_state.pagina_atual == "transacoes":
         tela_transacoes()
-
+    elif st.session_state.pagina_atual == "carteiras":
+        alterar_carteiras()

@@ -1,0 +1,10 @@
+CARTEIRAS = {
+    257: "PEPENERO FIM",
+    275: "FILIPINA FIM",
+    307: "PARMIGIANO FIM",
+    308: "HARPYJA FIM",
+    1313: "SL_01_ON",
+    1361: "PROF_01_ON",
+    1362: "TL_01_ON",
+    1489: "MEDICI",
+}
